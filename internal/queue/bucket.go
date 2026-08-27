@@ -31,8 +31,13 @@ func (b *bucket) due(nowNS int64, bySequence bool) []Entry {
 	}
 	b.entries = kept
 	if bySequence {
+		// Order by the monotonic submit-time sequence so that tasks due at the
+		// same instant are dispatched in the order they were submitted. Do NOT
+		// sort by ID: the identifier is not guaranteed to be monotonic with
+		// submission order (e.g. random/UUID schemes, multi-node node ids),
+		// so ID ordering would break submit-order fairness.
 		sort.SliceStable(out, func(i, j int) bool {
-			return out[i].ID < out[j].ID
+			return out[i].Seq < out[j].Seq
 		})
 	}
 	return out
