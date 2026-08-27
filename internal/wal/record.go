@@ -16,7 +16,15 @@ const (
 	EventSubmit Event = iota + 1
 	EventUpdate
 	EventDelete
+
+	// eventMax is the highest valid Event value. It bounds the event byte so
+	// that a corrupted or future/unknown event value is rejected during decode
+	// instead of silently replayed as a no-op and dropped.
+	eventMax Event = EventDelete
 )
+
+// valid reports whether e is a known event on the wire.
+func (e Event) valid() bool { return e >= EventSubmit && e <= eventMax }
 
 // Record is a single durable mutation.
 type Record struct {
@@ -26,6 +34,10 @@ type Record struct {
 }
 
 const headerSize = 4 + 1 + 4
+
+// HeaderSize is the byte length of the fixed record header (idLen + event +
+// payloadLen). Exported so callers and tests can reason about the wire format.
+func HeaderSize() int { return headerSize }
 
 // Encode serializes the record into a snappy-compressed blob.
 func (r Record) Encode() ([]byte, error) {
@@ -52,8 +64,15 @@ func Decode(blob []byte) (Record, error) {
 	if headerSize+idLen+payloadLen != len(raw) {
 		return Record{}, fmt.Errorf("wal record length mismatch")
 	}
+	event := Event(raw[4])
+	if !event.valid() {
+		// A corrupted event byte produces an unknown mutation. Reject it here
+		// so replay aborts rather than silently skipping the record (and the
+		// records that follow), which would lose tasks on recovery.
+		return Record{}, fmt.Errorf("wal record has unknown event %d", event)
+	}
 	return Record{
-		Event:   Event(raw[4]),
+		Event:   event,
 		TaskID:  string(raw[headerSize : headerSize+idLen]),
 		Payload: bytes.Clone(raw[headerSize+idLen:]),
 	}, nil

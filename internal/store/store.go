@@ -34,6 +34,10 @@ func New(w *wal.Manager, clk clock.Clock, m *metrics.Metrics) *Store {
 }
 
 // Recover replays the WAL into memory.
+//
+// Any unrecognized or corrupt record aborts recovery: a partial/corrupt
+// segment must surface a fatal error at startup instead of being silently
+// skipped, otherwise tasks stored after the corrupt record would vanish.
 func (s *Store) Recover() error {
 	return s.wal.Replay(func(rec wal.Record) error {
 		switch rec.Event {
@@ -45,6 +49,11 @@ func (s *Store) Recover() error {
 			s.apply(&t)
 		case wal.EventDelete:
 			s.remove(rec.TaskID)
+		default:
+			// Defense in depth: Decode already rejects unknown events, but a
+			// future caller path that bypasses validation must not silently
+			// drop the record.
+			return fmt.Errorf("replay record %s: unknown event %d", rec.TaskID, rec.Event)
 		}
 		return nil
 	})

@@ -115,7 +115,7 @@ func readSegment(path string, apply func(Record) error) error {
 		}
 		rec, err := Decode(blob)
 		if err != nil {
-			continue
+			return fmt.Errorf("decode segment %s record: %w", path, err)
 		}
 		if err := apply(rec); err != nil {
 			return err
