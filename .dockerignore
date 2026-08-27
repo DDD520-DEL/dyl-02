@@ -1,0 +1,13 @@
+.git
+.claude
+evidence
+private_oracles
+case_metadata
+cases
+workspaces
+runner
+staging
+*.jsonl
+*.zip
+*.pem
+*.key
