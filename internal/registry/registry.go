@@ -47,6 +47,7 @@ func (r *Registry) Replace(typ string, h Handler) error {
 		return fmt.Errorf("task type %q is not registered", typ)
 	}
 	r.handlers[typ] = h
+	r.snapshot[typ] = h
 	r.version++
 	return nil
 }
