@@ -10,8 +10,11 @@ import (
 )
 
 // Manager tracks the lease of each running task.
+// All methods are safe for concurrent use: Grant/Renew/Expire take the write
+// lock and Lookup takes the read lock, so workers that renew or expire a lease
+// never race with the scheduler that grants or looks one up.
 type Manager struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	leases   map[string]model.Lease
 	duration time.Duration
 	clock    clock.Clock
@@ -30,6 +33,8 @@ func New(duration time.Duration, clk clock.Clock, m *metrics.Metrics) *Manager {
 
 // Grant assigns the task to an owner, always advancing the fencing epoch.
 func (m *Manager) Grant(taskID, owner string) model.Lease {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	next := m.leases[taskID]
 	next.Epoch++
 	next.Owner = owner
@@ -42,6 +47,8 @@ func (m *Manager) Grant(taskID, owner string) model.Lease {
 // generation. A stale owner or epoch is rejected so a late renewal cannot
 // clobber a newer assignment.
 func (m *Manager) Renew(taskID, owner string, epoch int64) (model.Lease, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	cur, ok := m.leases[taskID]
 	if !ok {
 		return model.Lease{}, ErrNoLease
@@ -56,6 +63,8 @@ func (m *Manager) Renew(taskID, owner string, epoch int64) (model.Lease, error) 
 
 // Expire removes the lease only if it belongs to the given generation.
 func (m *Manager) Expire(taskID, owner string, epoch int64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	cur, ok := m.leases[taskID]
 	if !ok {
 		return ErrNoLease
@@ -70,8 +79,13 @@ func (m *Manager) Expire(taskID, owner string, epoch int64) error {
 	return nil
 }
 
-// Lookup returns the current lease of a task.
+// Lookup returns the current lease of a task. It takes the read lock so
+// concurrent readers (the scheduler reconciler and worker fences) never race
+// with a writer advancing the map. The returned Lease is a value copy, so
+// callers may inspect it after releasing the lock.
 func (m *Manager) Lookup(taskID string) (model.Lease, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
 	l, ok := m.leases[taskID]
 	return l, ok
 }
